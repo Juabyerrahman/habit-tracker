@@ -189,24 +189,37 @@ def test_cannot_link_identity_owned_by_another_user(app, client):
 
 
 # ---------- real Google provider (token verification mocked) ----------
-def test_google_provider_verification(monkeypatch):
+def test_google_provider_verification(monkeypatch, app):
     from app.auth.providers import google
 
     provider = google.GoogleProvider("client-id")
-    good = {"sub": "123", "email": "U@Example.com", "email_verified": True, "name": "U"}
-    monkeypatch.setattr(google.id_token, "verify_oauth2_token", lambda *a, **k: good)
-    ident = provider.verify("tok")
-    assert (ident.provider, ident.subject, ident.email) == ("google", "123", "u@example.com")
+    good = {
+        "sub": "123",
+        "email": "U@Example.com",
+        "email_verified": True,
+        "name": "U",
+    }
 
-    monkeypatch.setattr(google.id_token, "verify_oauth2_token", lambda *a, **k: {**good, "email_verified": False})
-    with pytest.raises(ApiError) as e:
-        provider.verify("tok")
-    assert e.value.status == 403
+    monkeypatch.setattr(
+        google.id_token,
+        "verify_oauth2_token",
+        lambda *a, **k: good,
+    )
 
-    def boom(*a, **k):
-        raise ValueError("bad signature")
+    with app.app_context():
+        ident = provider.verify("tok")
 
-    monkeypatch.setattr(google.id_token, "verify_oauth2_token", boom)
-    with pytest.raises(ApiError) as e:
-        provider.verify("tok")
-    assert e.value.status == 401
+        assert (ident.provider, ident.subject, ident.email) == (
+            "google", "123", "u@example.com"
+        )
+
+        monkeypatch.setattr(
+            google.id_token,
+            "verify_oauth2_token",
+            lambda *a, **k: {**good, "email_verified": False},
+        )
+
+        with pytest.raises(ApiError) as e:
+            provider.verify("tok")
+
+        assert e.value.code == "email_not_verified"

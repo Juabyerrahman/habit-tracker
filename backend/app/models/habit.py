@@ -1,5 +1,6 @@
 from app.extensions import db
 from app.models.base import IdMixin, TimestampMixin, iso
+from app.utils.time import utcnow
 
 
 def weekdays_to_mask(days) -> int:
@@ -59,3 +60,34 @@ class HabitCompletion(IdMixin, TimestampMixin, db.Model):
     deleted_at = db.Column(db.DateTime)  # tombstone so offline sync can propagate un-checks
 
     habit = db.relationship("Habit", back_populates="completions")
+class HabitScheduleVersion(IdMixin, db.Model):
+    __tablename__ = "habit_schedule_versions"
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "habit_id",
+            "effective_from",
+            name="uq_habit_schedule_effective_from",
+        ),
+        db.Index(
+            "ix_habit_schedule_habit_effective",
+            "habit_id",
+            "effective_from",
+        ),
+    )
+
+    habit_id = db.Column(
+        db.String(36),
+        db.ForeignKey("habits.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    effective_from = db.Column(db.Date, nullable=False)
+
+    schedule_mask = db.Column(db.Integer, nullable=False)
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utcnow,
+    )

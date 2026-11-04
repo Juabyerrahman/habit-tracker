@@ -4,7 +4,7 @@ from sqlalchemy import func
 from app.auth.decorators import auth_required
 from app.errors import ApiError
 from app.extensions import db
-from app.models import Habit, HabitCompletion
+from app.models import Habit, HabitCompletion, HabitScheduleVersion
 from app.models.habit import weekdays_to_mask
 from app.routes._helpers import next_sort_order, owned_or_404
 from app.schemas import load
@@ -31,20 +31,34 @@ def list_habits():
 @auth_required
 def create_habit():
     data = load(HabitCreateSchema(), request.get_json(silent=True))
+
+    start_date = data["start_date"] or today_in(g.user.timezone)
+    schedule_mask = weekdays_to_mask(data["schedule"])
+
     habit = Habit(
         user_id=g.user.id,
         name=data["name"],
         description=data["description"],
         category=data["category"],
         icon=data["icon"],
-        start_date=data["start_date"] or today_in(g.user.timezone),
-        schedule_mask=weekdays_to_mask(data["schedule"]),
+        start_date=start_date,
+        schedule_mask=schedule_mask,
         sort_order=next_sort_order(Habit),
     )
-    db.session.add(habit)
-    db.session.commit()
-    return jsonify({"habit": habit.to_dict()}), 201
 
+    db.session.add(habit)
+    db.session.flush()
+
+    initial_version = HabitScheduleVersion(
+        habit_id=habit.id,
+        effective_from=start_date,
+        schedule_mask=schedule_mask,
+    )
+
+    db.session.add(initial_version)
+    db.session.commit()
+
+    return jsonify({"habit": habit.to_dict()}), 201
 
 @bp.get("/<habit_id>")
 @auth_required
@@ -57,21 +71,93 @@ def get_habit(habit_id):
 def update_habit(habit_id):
     habit = owned_or_404(Habit, habit_id)
     _require_active(habit)
+
     data = load(HabitUpdateSchema(), request.get_json(silent=True))
 
+    # Validate start-date changes.
     if "start_date" in data:
+        new_start_date = data["start_date"]
+
         earliest = (
             db.session.query(func.min(HabitCompletion.date))
-            .filter(HabitCompletion.habit_id == habit.id, HabitCompletion.deleted_at.is_(None))
+            .filter(
+                HabitCompletion.habit_id == habit.id,
+                HabitCompletion.deleted_at.is_(None),
+            )
             .scalar()
         )
-        if earliest and data["start_date"] > earliest:
-            raise ApiError(422, "start_date_after_completion", f"Habit already has a completion on {earliest}.")
+
+        if earliest and new_start_date > earliest:
+            raise ApiError(
+                422,
+                "start_date_after_completion",
+                f"Habit already has a completion on {earliest}.",
+            )
+
+        # If the habit starts earlier, extend its earliest known
+        # schedule version back to the new start date.
+        if new_start_date < habit.start_date:
+            first_version = (
+                HabitScheduleVersion.query
+                .filter_by(habit_id=habit.id)
+                .order_by(HabitScheduleVersion.effective_from.asc())
+                .first()
+            )
+
+            if first_version:
+                first_version.effective_from = new_start_date
+            else:
+                db.session.add(
+                    HabitScheduleVersion(
+                        habit_id=habit.id,
+                        effective_from=new_start_date,
+                        schedule_mask=habit.schedule_mask,
+                    )
+                )
+
+        habit.start_date = new_start_date
+        data.pop("start_date")
+
+    # Record schedule changes.
     if "schedule" in data:
-        habit.schedule_mask = weekdays_to_mask(data.pop("schedule"))
+        new_schedule_mask = weekdays_to_mask(data.pop("schedule"))
+
+        if new_schedule_mask != habit.schedule_mask:
+            effective_from = max(
+                today_in(g.user.timezone),
+                habit.start_date,
+            )
+
+            existing_version = (
+                HabitScheduleVersion.query
+                .filter_by(
+                    habit_id=habit.id,
+                    effective_from=effective_from,
+                )
+                .first()
+            )
+
+            if existing_version:
+                # Multiple changes on the same effective date
+                # update that day's version.
+                existing_version.schedule_mask = new_schedule_mask
+            else:
+                db.session.add(
+                    HabitScheduleVersion(
+                        habit_id=habit.id,
+                        effective_from=effective_from,
+                        schedule_mask=new_schedule_mask,
+                    )
+                )
+
+            habit.schedule_mask = new_schedule_mask
+
+    # Update the remaining ordinary habit fields.
     for key, value in data.items():
         setattr(habit, key, value)
+
     db.session.commit()
+
     return jsonify({"habit": habit.to_dict()})
 
 

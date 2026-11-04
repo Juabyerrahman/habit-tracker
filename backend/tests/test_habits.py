@@ -1,6 +1,6 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
-from app.models import HabitCompletion
+from app.models import HabitCompletion, HabitScheduleVersion
 from app.utils.time import today_in
 from tests.conftest import signup
 
@@ -113,3 +113,115 @@ def test_users_cannot_access_each_others_habits(app, client, auth):
         r = getattr(c2, method)(url, headers=other, json={"name": "hack"} if method == "patch" else None)
         assert r.status_code == 404, (method, url)
     assert c2.get("/api/habits", headers=other).get_json()["habits"] == []
+def test_create_habit_creates_initial_schedule_version(client, auth):
+    h = make_habit(client, auth, schedule=[0, 2, 4])
+
+    versions = HabitScheduleVersion.query.filter_by(
+        habit_id=h["id"]
+    ).all()
+
+    assert len(versions) == 1
+    assert versions[0].effective_from == today() - timedelta(days=10)
+    assert versions[0].schedule_mask == 21
+
+
+def test_same_day_schedule_changes_update_existing_version(
+    client, auth, monkeypatch
+):
+    h = make_habit(client, auth, schedule=[0, 2, 4])
+
+    today_date = date(2026, 11, 4)
+    monkeypatch.setattr(
+        "app.routes.habits.today_in",
+        lambda timezone: today_date,
+    )
+
+    url = f"/api/habits/{h['id']}"
+
+    # First schedule change.
+    r = client.patch(url, headers=auth, json={"schedule": [5, 6]})
+    assert r.status_code == 200
+
+    # Second change on the same day.
+    r = client.patch(url, headers=auth, json={"schedule": [1, 3]})
+    assert r.status_code == 200
+
+    # Repeating the same schedule must not create another version.
+    r = client.patch(url, headers=auth, json={"schedule": [1, 3]})
+    assert r.status_code == 200
+
+    versions = (
+        HabitScheduleVersion.query
+        .filter_by(habit_id=h["id"])
+        .order_by(HabitScheduleVersion.effective_from)
+        .all()
+    )
+
+    assert len(versions) == 2
+    assert versions[0].schedule_mask == 21
+    assert versions[1].effective_from == today_date
+    assert versions[1].schedule_mask == 10
+
+
+def test_schedule_changes_on_different_days_create_versions(
+    client, auth, monkeypatch
+):
+    h = make_habit(client, auth, schedule=[0, 2, 4])
+    url = f"/api/habits/{h['id']}"
+
+    first_day = date(2026, 11, 4)
+    second_day = date(2026, 11, 5)
+
+    monkeypatch.setattr(
+        "app.routes.habits.today_in",
+        lambda timezone: first_day,
+    )
+
+    r = client.patch(url, headers=auth, json={"schedule": [5, 6]})
+    assert r.status_code == 200
+
+    monkeypatch.setattr(
+        "app.routes.habits.today_in",
+        lambda timezone: second_day,
+    )
+
+    r = client.patch(url, headers=auth, json={"schedule": [0, 6]})
+    assert r.status_code == 200
+
+    versions = (
+        HabitScheduleVersion.query
+        .filter_by(habit_id=h["id"])
+        .order_by(HabitScheduleVersion.effective_from)
+        .all()
+    )
+
+    assert len(versions) == 3
+    assert versions[0].schedule_mask == 21
+    assert versions[1].effective_from == first_day
+    assert versions[1].schedule_mask == 96
+    assert versions[2].effective_from == second_day
+    assert versions[2].schedule_mask == 65
+
+
+def test_moving_start_date_earlier_extends_initial_schedule(
+    client, auth
+):
+    h = make_habit(client, auth, schedule=[0, 2, 4])
+
+    new_start_date = today() - timedelta(days=15)
+
+    r = client.patch(
+        f"/api/habits/{h['id']}",
+        headers=auth,
+        json={"start_date": new_start_date.isoformat()},
+    )
+
+    assert r.status_code == 200
+
+    versions = HabitScheduleVersion.query.filter_by(
+        habit_id=h["id"]
+    ).all()
+
+    assert len(versions) == 1
+    assert versions[0].effective_from == new_start_date
+    assert versions[0].schedule_mask == 21
