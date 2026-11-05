@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
+import ThemeToggle from "../components/ThemeToggle";
 
 export default function LoginPage() {
   const { login, startGoogleLogin } = useAuth();
@@ -27,7 +28,10 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-neutral-50 px-4 py-10">
+    <main className="relative flex min-h-screen items-center justify-center bg-neutral-50 px-4 py-10">
+  <div className="fixed right-4 top-4 z-50">
+    <ThemeToggle />
+  </div>
       <section className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm">
         <Link to="/" className="text-xl font-bold tracking-tight text-neutral-900">
           Habit Tracker<span className="text-neutral-400">.</span>

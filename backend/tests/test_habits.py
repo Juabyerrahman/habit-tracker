@@ -1,6 +1,10 @@
 from datetime import date, timedelta
 
-from app.models import HabitCompletion, HabitScheduleVersion
+from app.models import (
+    HabitCompletion,
+    HabitScheduleVersion,
+    HabitArchivePeriod,
+)
 from app.utils.time import today_in
 from tests.conftest import signup
 
@@ -225,3 +229,110 @@ def test_moving_start_date_earlier_extends_initial_schedule(
     assert len(versions) == 1
     assert versions[0].effective_from == new_start_date
     assert versions[0].schedule_mask == 21
+
+def test_archive_history_is_created_and_closed(client, auth):
+    habit = make_habit(client, auth)
+    url = f"/api/habits/{habit['id']}"
+
+    # First archive creates one open history period.
+    assert client.post(f"{url}/archive", headers=auth).status_code == 200
+
+    periods = HabitArchivePeriod.query.filter_by(
+        habit_id=habit["id"]
+    ).all()
+
+    assert len(periods) == 1
+    assert periods[0].restored_at is None
+
+    # Repeated archive must not create duplicates.
+    assert client.post(f"{url}/archive", headers=auth).status_code == 200
+    assert HabitArchivePeriod.query.filter_by(
+        habit_id=habit["id"]
+    ).count() == 1
+
+    # Restore closes the existing period.
+    assert client.post(f"{url}/restore", headers=auth).status_code == 200
+
+    period = HabitArchivePeriod.query.filter_by(
+        habit_id=habit["id"]
+    ).one()
+
+    assert period.restored_at is not None
+
+    # Repeated restore must not create or modify periods.
+    assert client.post(f"{url}/restore", headers=auth).status_code == 200
+    assert HabitArchivePeriod.query.filter_by(
+        habit_id=habit["id"]
+    ).count() == 1
+
+
+def test_multiple_archive_restore_cycles(client, auth):
+    habit = make_habit(client, auth)
+    url = f"/api/habits/{habit['id']}"
+
+    # First archive/restore cycle.
+    assert client.post(f"{url}/archive", headers=auth).status_code == 200
+    assert client.post(f"{url}/restore", headers=auth).status_code == 200
+
+    # Second archive/restore cycle.
+    assert client.post(f"{url}/archive", headers=auth).status_code == 200
+    assert client.post(f"{url}/restore", headers=auth).status_code == 200
+
+    periods = (
+        HabitArchivePeriod.query
+        .filter_by(habit_id=habit["id"])
+        .order_by(HabitArchivePeriod.archived_from)
+        .all()
+    )
+
+    assert len(periods) == 2
+    assert all(period.restored_at is not None for period in periods)
+    assert periods[0].archived_from <= periods[0].restored_at
+    assert periods[1].archived_from <= periods[1].restored_at
+
+def test_scheduled_completion_is_not_bonus(client, auth):
+    target_day = today() - timedelta(days=2)
+
+    habit = make_habit(
+        client,
+        auth,
+        schedule=[target_day.weekday()],
+    )
+
+    url = f"/api/habits/{habit['id']}/completions/{target_day.isoformat()}"
+    response = client.put(url, headers=auth)
+
+    assert response.status_code == 200
+    assert response.get_json()["is_bonus"] is False
+
+    completion = HabitCompletion.query.filter_by(
+        habit_id=habit["id"],
+        date=target_day,
+    ).one()
+
+    assert completion.is_bonus is False
+
+
+def test_unscheduled_completion_is_bonus(client, auth):
+    target_day = today() - timedelta(days=2)
+
+    unscheduled_weekday = (target_day.weekday() + 1) % 7
+
+    habit = make_habit(
+        client,
+        auth,
+        schedule=[unscheduled_weekday],
+    )
+
+    url = f"/api/habits/{habit['id']}/completions/{target_day.isoformat()}"
+    response = client.put(url, headers=auth)
+
+    assert response.status_code == 200
+    assert response.get_json()["is_bonus"] is True
+
+    completion = HabitCompletion.query.filter_by(
+        habit_id=habit["id"],
+        date=target_day,
+    ).one()
+
+    assert completion.is_bonus is True

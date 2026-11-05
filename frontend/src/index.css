@@ -1,31 +1,106 @@
-﻿@import "tailwindcss";
+﻿
+@import "tailwindcss";
 
 :root {
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  color: #171717;
-  background: #ffffff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  color-scheme: light;
+  --app-bg: #ffffff;
+  --app-text: #171717;
+  --app-card: #ffffff;
+  --app-border: #e5e5e5;
+  --app-muted: #737373;
+  --app-accent: #f97316;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --app-bg: #111111;
+  --app-text: #f5f5f5;
+  --app-card: #1b1b1b;
+  --app-border: #333333;
+  --app-muted: #a3a3a3;
+  --app-accent: #f97316;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+}
+
 body {
   margin: 0;
-  min-width: 320px;
   min-height: 100vh;
+  background: var(--app-bg);
+  color: var(--app-text);
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
 button {
   cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  color: var(--app-text);
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] select {
+  background-color: #202020;
+  border-color: #404040;
+}
+
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder {
+  color: #737373;
+}
+
+/* Shared Tailwind neutral surfaces */
+:root[data-theme="dark"] .bg-white {
+  background-color: var(--app-card);
+}
+
+:root[data-theme="dark"] .bg-neutral-50 {
+  background-color: #151515;
+}
+
+:root[data-theme="dark"] .bg-neutral-100 {
+  background-color: #222222;
+}
+
+:root[data-theme="dark"] .border-neutral-100,
+:root[data-theme="dark"] .border-neutral-200,
+:root[data-theme="dark"] .border-neutral-300 {
+  border-color: var(--app-border);
+}
+
+:root[data-theme="dark"] .text-neutral-900,
+:root[data-theme="dark"] .text-neutral-800,
+:root[data-theme="dark"] .text-neutral-700 {
+  color: #f5f5f5;
+}
+
+:root[data-theme="dark"] .text-neutral-500,
+:root[data-theme="dark"] .text-neutral-400 {
+  color: var(--app-muted);
 }

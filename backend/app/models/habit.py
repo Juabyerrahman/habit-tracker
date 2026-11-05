@@ -45,6 +45,8 @@ class Habit(IdMixin, TimestampMixin, db.Model):
         }
 
 
+
+
 class HabitCompletion(IdMixin, TimestampMixin, db.Model):
     """Only completions are stored. 'Missed' is derived (scheduled, past, not completed)."""
 
@@ -54,12 +56,27 @@ class HabitCompletion(IdMixin, TimestampMixin, db.Model):
         db.Index("ix_completion_user_date", "user_id", "date"),
     )
 
+
     habit_id = db.Column(db.String(36), db.ForeignKey("habits.id", ondelete="CASCADE"), nullable=False)
+
     user_id = db.Column(db.String(36), db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
     date = db.Column(db.Date, nullable=False)
+
+    is_bonus = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.false(),
+    )
+
     deleted_at = db.Column(db.DateTime)  # tombstone so offline sync can propagate un-checks
 
+
     habit = db.relationship("Habit", back_populates="completions")
+
+
+
 class HabitScheduleVersion(IdMixin, db.Model):
     __tablename__ = "habit_schedule_versions"
 
