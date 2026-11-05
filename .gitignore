@@ -1,4 +1,4 @@
-﻿# Secrets
+# Secrets
 .env
 .env.*
 !.env.example
@@ -32,3 +32,5 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+.neon
